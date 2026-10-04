@@ -1,0 +1,60 @@
+{
+  "project": "AVD 2026-27 aircraft",
+  "maintainer": "Lukas",
+  "params_dir": "params",
+  "main_branch": "main",
+  "disciplines": {
+    "requirements": {
+      "folders": [],
+      "owners": []
+    },
+    "weights": {
+      "folders": ["weights"],
+      "owners": []
+    },
+    "performance": {
+      "folders": ["performance"],
+      "owners": []
+    },
+    "wing": {
+      "folders": ["wing"],
+      "owners": []
+    },
+    "aero": {
+      "folders": ["aero"],
+      "owners": []
+    },
+    "tail": {
+      "folders": ["tail"],
+      "owners": []
+    },
+    "fuselage": {
+      "folders": ["fuselage"],
+      "owners": []
+    },
+    "propulsion": {
+      "folders": ["propulsion"],
+      "owners": []
+    },
+    "undercarriage": {
+      "folders": ["undercarriage"],
+      "owners": []
+    },
+    "loads": {
+      "folders": ["loads"],
+      "owners": []
+    },
+    "structures": {
+      "folders": ["structures"],
+      "owners": []
+    }
+  },
+  "bounds": {
+    "MTOW": [0, null],
+    "MLW": [0, null],
+    "W_payload": [0, null],
+    "W_fuel_design": [0, null]
+  },
+  "constraints": ["MLW <= MTOW", "W_payload + W_fuel_design < MTOW"],
+  "max_file_mb": 20
+}

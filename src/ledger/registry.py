@@ -61,6 +61,8 @@ def normalise_value(v):
     if isinstance(
         v, list
     ):  # if the element is a list we can just recurse, otherwise do the scalar check
+        if len(v) == 1 and not isinstance(v[0], list):  # for matlab 1x1 arrays
+            return normalise_value(v[0])
         return [normalise_value(e) if isinstance(e, list) else _scalar(e) for e in v]
 
     raise LedgerError(

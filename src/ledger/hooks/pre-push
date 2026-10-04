@@ -1,0 +1,39 @@
+#!/bin/sh
+# ledger: block pushes to main and force pushes.
+# Bypass (maintainers only): LEDGER_ALLOW_MAIN=1 git push ...
+[ -n "$LEDGER_ALLOW_MAIN" ] && exit 0
+
+all_zero() {
+  case "$1" in
+    *[!0]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main)
+      echo "" >&2
+      echo "ledger: pushing to 'main' is blocked. Changes reach main through a pull request." >&2
+      echo "        Use:  ledger push \"what you did\"" >&2
+      echo "" >&2
+      exit 1
+      ;;
+    refs/tags/*)
+      continue
+      ;;
+  esac
+  # deleting a (non-main) remote branch is fine
+  all_zero "$local_sha" && continue
+  # a new branch is fine
+  all_zero "$remote_sha" && continue
+  # otherwise it must be a fast-forward of what's on GitHub
+  if ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+    echo "" >&2
+    echo "ledger: this would overwrite history on GitHub (force push) and is blocked." >&2
+    echo "        Run  ledger sync  and then  ledger push  again, or ask the repo maintainer." >&2
+    echo "" >&2
+    exit 1
+  fi
+done
+exit 0

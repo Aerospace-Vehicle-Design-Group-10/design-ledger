@@ -24,9 +24,21 @@ DEFAULTS = {
     "constraints": [
         # eg "MLW <= MTOW", "W_payload + W_fuel_design < MTOW"
     ],
-    "lint": [
-        # we could set stuff like min sig figs or rel tol or ignored values, that sort of stuff
-    ],
+    "max_file_mb": 20,  # files bigger than this are refused by push and flagged by CI
+    "lint": {  # the hard-coded number check; ledger.json can override any of these
+        "level": "error",  # "error" blocks CI, "warning" only reports
+        "min_sig_figs": 3,  # literals with fewer sig figs are ignored (0.5, 2, ...)
+        "rel_tol": 0.005,  # how close a literal must be to a registry value to flag
+        "extensions": [".py", ".m", ".ipynb"],
+        "exclude": ["external", "params", "export", ".venv", "venv"],
+        "ignore_values": [],  # extra literal values never to flag
+    },
+    "export": {  # where `ledger export` reads/writes
+        "csv_template": "export/designparams_template.csv",
+        "csv_map": "export/designparams_map.json",
+        "csv_out": "export/designparams.csv",
+        "tex_out": "export/params.tex",
+    },
 }
 
 

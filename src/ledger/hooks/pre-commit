@@ -1,0 +1,13 @@
+#!/bin/sh
+# ledger: block commits made directly on main.
+# Bypass (maintainers only): LEDGER_ALLOW_MAIN=1 git commit ...
+[ -n "$LEDGER_ALLOW_MAIN" ] && exit 0
+branch=$(git symbolic-ref --short -q HEAD)
+if [ "$branch" = "main" ]; then
+  echo "" >&2
+  echo "ledger: commits directly on 'main' are blocked." >&2
+  echo "        Use:  ledger push \"what you did\"   (it puts your work on its own branch)" >&2
+  echo "" >&2
+  exit 1
+fi
+exit 0

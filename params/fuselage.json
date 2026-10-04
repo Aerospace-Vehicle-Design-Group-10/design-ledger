@@ -1,0 +1,16 @@
+{
+  "CG_x": {
+    "value": 4000,
+    "units": "m",
+    "status": "computed",
+    "source": {
+      "hash": "c200a552e94d9c868ad6481a92bfd699b45162c8",
+      "script": "test/test_read_write.py"
+    },
+    "inputs": {
+      "cargo_mass": 40000
+    },
+    "by": "Lukas Campbell",
+    "updated": "2026-10-04T14:59:12Z"
+  }
+}

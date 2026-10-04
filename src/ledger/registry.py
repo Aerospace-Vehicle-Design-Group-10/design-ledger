@@ -198,11 +198,10 @@ class Registry:
     def save(self, params_dir: Path, discipline: str):
         params_dir.mkdir(parents=True, exist_ok=True)
         path = params_dir / f"{discipline}.json"
-        text = json.dumps(
-            dict(sorted(self.files.get(discipline, {}).items())),
-            indent=2,
-            sort_keys=True,
-        )
+
+        text = jsonfmt.dumps(dict(sorted(self.files.get(discipline, {}).items())))
+
         tmp = path.with_suffix(".json_tmp")
         tmp.write_text(text, encoding="utf-8", newline="\n")
+
         os.replace(tmp, path)

@@ -149,9 +149,9 @@ class Registry:
             except (subprocess.CalledProcessError, ValueError):
                 pass
 
-            # files is a dict keyed by the discipline and each entry is the
-            # dict that was loaded from the json
-            return cls(files)
+        # files is a dict keyed by the discipline and each entry is the
+        # dict that was loaded from the json
+        return cls(files)
 
     @property
     def records(self) -> dict[str, dict]:

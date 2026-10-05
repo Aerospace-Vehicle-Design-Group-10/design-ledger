@@ -54,14 +54,18 @@ def current_branch(root: Path) -> str | None:
     return p.stdout.strip() or None
 
 
+# --ignore-submodules=dirty: edited files *inside* a submodule (e.g. external/design-ledger)
+# aren't work in this repo, and `add -A` can't commit them anyway. A submodule whose
+# checked-out commit moved still shows up.
 def is_dirty(root: Path) -> bool:
-    return bool(out(root, "status", "--porcelain"))
+    return bool(out(root, "status", "--porcelain", "--ignore-submodules=dirty"))
 
 
 def changed_paths(root: Path) -> list[tuple[str, str]]:
     """(status, path) for everything git would commit with `add -A`."""
     res = []
-    for line in git(root, "status", "--porcelain", "-uall", "-z").stdout.split("\0"):
+    for line in git(root, "status", "--porcelain", "-uall", "-z",
+                    "--ignore-submodules=dirty").stdout.split("\0"):
         if not line:
             continue
         code, path = line[:2], line[3:]
@@ -162,6 +166,62 @@ def catch_up(cfg: Config, branch: str) -> list[str]:
     return merge_into_branch(cfg, remote_main(cfg))
 
 
+# ------------------------------------------------------------------ submodules
+# The design repo pins the ledger tools as a submodule. Two ways that pin goes wrong:
+#   * the checkout lags behind the pin (main moved it forward and nothing re-synced the
+#     folder), and `add -A` would quietly commit the old version back;
+#   * the checkout is a commit that only exists on this laptop, so CI can't fetch it.
+# Neither should ever be committed. A checkout *ahead* of the pin that is on GitHub is a
+# deliberate tools upgrade, and is committed like any other change.
+def update_submodules(root: Path):
+    """Make every submodule folder match the commit this repo records."""
+    if (root / ".gitmodules").is_file():
+        git(root, "submodule", "update", "--init", "--recursive", check=False)
+
+
+def _recorded_commit(root: Path, path: str) -> str | None:
+    # the index entry for a submodule is "160000 <sha> <stage>\t<path>"
+    line = git(root, "ls-files", "-s", "--", path, check=False).stdout.split()
+    return line[1] if len(line) >= 2 else None
+
+
+def bad_submodule_pins(root: Path) -> list[tuple[str, str, str, str]]:
+    """(path, checked-out sha, recorded sha, why) for submodules that must not be committed."""
+    if not (root / ".gitmodules").is_file():
+        return []
+    bad = []
+    for line in git(root, "submodule", "status", check=False).stdout.splitlines():
+        # "+<sha> <path> (<describe>)": '+' means the checkout differs from the recorded commit
+        if not line.startswith("+"):
+            continue
+        checked, path = line[1:].split()[:2]
+        recorded = _recorded_commit(root, path)
+        if not recorded:
+            continue
+        sub = root / path
+        git(sub, "fetch", "-q", "--prune", "origin", check=False)
+        if ok(sub, "merge-base", "--is-ancestor", checked, recorded):
+            bad.append((path, checked, recorded, "behind the version this repo uses"))
+        elif not out(sub, "branch", "-r", "--contains", checked):
+            bad.append((path, checked, recorded, "a commit that isn't on GitHub"))
+    return bad
+
+
+def fix_submodule_pins(root: Path) -> bool:
+    """Reset bad submodule checkouts to the recorded commit. True if all are fixed."""
+    fixed = True
+    for path, checked, recorded, why in bad_submodule_pins(root):
+        p = git(root, "submodule", "update", "--init", "--", path, check=False)
+        if p.returncode == 0:
+            say(f"Note: {path} was checked out at {checked[:7]}, {why}; "
+                f"reset it to {recorded[:7]} instead of committing it.")
+        else:
+            fixed = False
+            say(f"{path} is checked out at {checked[:7]}, {why}, and couldn't be reset:")
+            say("  " + (p.stderr or p.stdout).strip().replace("\n", "\n  "))
+    return fixed
+
+
 # ------------------------------------------------------------------ setup
 def local_state_path(root: Path) -> Path:
     return root / ".ledger" / "local.json"
@@ -251,8 +311,6 @@ def sync(cfg: Config) -> int:
     ensure_setup(cfg)
     say("Fetching from GitHub...")
     fetch(cfg)
-    if (root / ".gitmodules").is_file():
-        git(root, "submodule", "update", "--init", "--recursive", check=False)
     main, rmain = cfg.main, remote_main(cfg)
     br = current_branch(root)
 
@@ -281,6 +339,8 @@ def sync(cfg: Config) -> int:
             return 1
         if merged_branch:
             git(root, "branch", "-d", merged_branch, check=False)   # -d: only if fully merged
+        # after the fast-forward, so the tools folder matches the pin main now records
+        update_submodules(root)
         say(f"Up to date with {rmain}.")
         return 0
 
@@ -294,6 +354,7 @@ def sync(cfg: Config) -> int:
         say(f"The latest {main} conflicts with your branch in: {', '.join(conflicted)}")
         say(f"Nothing was changed. Ask {who(cfg)} to resolve it.")
         return 2
+    update_submodules(root)
     say(f"On '{br}' (PR still open), now including the latest {main}.")
     return 0
 
@@ -308,6 +369,12 @@ def push(cfg: Config, message: str, yes: bool = False, dry_run: bool = False,
     if os.path.exists(os.path.join(root, ".git", "MERGE_HEAD")):
         raise LedgerError(f"A merge is in progress in this repo. Ask {who(cfg)} before pushing.")
 
+    if dry_run:
+        for path, checked, recorded, why in bad_submodule_pins(root):
+            say(f"Note: {path} is at {checked[:7]}, {why}; push will reset it to {recorded[:7]}.")
+    elif not fix_submodule_pins(root):
+        say(f"Nothing was pushed. Ask {who(cfg)}.")
+        return 1
     files = changed_paths(root)
     limit = float(cfg["max_file_mb"]) * 1024 * 1024
     big = [(p, (root / p).stat().st_size) for _, p in files if (root / p).is_file() and (root / p).stat().st_size > limit]
@@ -364,6 +431,8 @@ def push(cfg: Config, message: str, yes: bool = False, dry_run: bool = False,
         new = new_branch_name(root, message + " rescue")
         git(root, "switch", "-c", new)
         br = new
+    if not conflicted:
+        update_submodules(root)    # merging main may have moved the tools pin
 
     say("Uploading...")
     p = git(root, "push", "-u", "origin", br, check=False)

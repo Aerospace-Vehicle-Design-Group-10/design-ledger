@@ -103,7 +103,7 @@ def test_missing_name_suggests(repo):
     seed(repo)
     repo.script("weights/typo.py", 'ledger.get("MTOV")\n')
     p = repo.run("weights/typo.py", check=False)
-    assert "Did you mean: MTOW" in p.stderr
+    assert "did you mean MTOW" in p.stderr
 
 
 def test_frozen_blocks_publish_and_unfreeze(repo):
@@ -205,7 +205,7 @@ def test_schema_errors(repo):
     assert p.returncode == 1 and "invalid name" in p.stdout and "missing 'units'" in p.stdout
     (repo.root / "params/wing.json").write_text("{nope")
     p = repo.cli("check", "--no-lint", check=False)
-    assert "not valid JSON" in p.stdout
+    assert "doesn't contain valid json" in p.stdout
 
 
 def test_lint_finds_hard_coded_numbers(repo):

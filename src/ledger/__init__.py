@@ -5,7 +5,7 @@ W0 = ledger.get("MTOW")
 ledger.publish("CG_x", x_cg, units="m")
 """
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 
 from .api import begin, get, override, publish, reads, record, step  # noqa: E402

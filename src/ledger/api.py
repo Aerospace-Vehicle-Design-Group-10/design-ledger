@@ -119,7 +119,10 @@ def reads() -> dict:
 
 # forgets everything read so far (eg if calculating unrelated values so the input stays clean)
 def begin():
-    _reads[:] = [{}]
+    # empty every level but keep the stack's depth, so an open step() block can still
+    # pop its own level on exit (replacing the stack here used to crash that pop)
+    for log in _reads:
+        log.clear()
 
 
 # reads inside a block are the only inputs of values published inside that block
@@ -246,12 +249,15 @@ def publish_with(
             )
         if cfg.disciplines and disc not in cfg.disciplines:
             raise LedgerError(
-                f"don't know this discipline: '{discipline}'. known: {', '.join(cfg.disciplines)}."
+                f"don't know this discipline: '{disc}'. known: {', '.join(cfg.disciplines)}."
             )
-        elif discipline and discipline != disc:
-            raise LedgerError(
-                f"'{name}' already lives in params/{disc}.json, not {discipline}."
-            )
+    # an existing name never moves files; asking for a different one is almost always a
+    # name collision (two disciplines both wanting "S"), so refuse instead of overwriting
+    elif discipline and discipline != disc:
+        raise LedgerError(
+            f"'{name}' already lives in params/{disc}.json, not {discipline}. "
+            f"if that's a different quantity, give it a different name."
+        )
 
     # everything read, or only the names given
     if inputs is not None:

@@ -10,7 +10,14 @@ from pathlib import Path
 
 from . import lint, provenance
 from .config import Config
-from .registry import NAME_RE, STATUSES, Registry, values_equal
+from .registry import (
+    NAME_RE,
+    STATUSES,
+    UNVERIFIED,
+    Registry,
+    values_equal,
+    verification_holds,
+)
 
 
 @dataclass
@@ -239,6 +246,19 @@ def run(cfg: Config, since: str | None = None, do_lint: bool = True) -> Report:
         if not isinstance(rec.get("inputs", {}), dict):
             rep.add("error", "schema", name, "'inputs' must be an object", d)
 
+        # ---- verification: "-" or {by, at, value, units[, note]}
+        ver = rec.get("verified", UNVERIFIED)
+        if ver != UNVERIFIED:
+            if not (isinstance(ver, dict) and all(k in ver for k in ("by", "at", "value", "units"))):
+                rep.add("error", "schema", name,
+                        "'verified' must be \"-\" or {by, at, value, units}; use `ledger verify`", d)
+            elif not verification_holds(rec):
+                # publish clears verifications itself, so this means a hand-edit
+                rep.add("warning", "verified", name,
+                        f"verified by {ver['by']} as {_fmt(ver['value'])} {ver['units']}, but it's now "
+                        f"{_fmt(rec.get('value'))} {rec.get('units')}; re-check and `ledger verify` "
+                        f"again, or `ledger unverify`", d)
+
     values = {n: r.get("value") for n, r in recs.items() if isinstance(r, dict)}
     numeric = {
         n: v
@@ -402,6 +422,23 @@ def run(cfg: Config, since: str | None = None, do_lint: bool = True) -> Report:
                         disc_of.get(name),
                     )
 
+    # ---- verifications added or removed in this PR, so reviewers see who vouched for what
+    if since:
+        base = Registry.load_at_ref(root, cfg["params_dir"], since)
+        brecs = base.records
+        for name, rec in recs.items():
+            if not isinstance(rec, dict):
+                continue
+            now = verification_holds(rec)
+            before = isinstance(brecs.get(name), dict) and verification_holds(brecs[name])
+            if now and (not before or brecs[name].get("verified") != rec.get("verified")):
+                v = rec["verified"]
+                rep.add("info", "verify", name,
+                        f"verified by {v['by']}" + (f": {v['note']}" if v.get("note") else ""),
+                        disc_of.get(name))
+            elif before and not now:
+                rep.add("info", "verify", name, "verification removed", disc_of.get(name))
+
     # ---- big files
     files_scope = changed_files(root, since) if since else None
     if files_scope:
@@ -434,5 +471,6 @@ def run(cfg: Config, since: str | None = None, do_lint: bool = True) -> Report:
         "upstream": len(rep.upstream),
         "errors": len(rep.errors),
         "warnings": len(rep.warnings),
+        "verified": sum(1 for r in recs.values() if isinstance(r, dict) and verification_holds(r)),
     }
     return rep

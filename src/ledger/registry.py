@@ -12,6 +12,20 @@ from pathlib import Path
 from . import jsonfmt
 from .config import LedgerError
 
+# "verified" is either UNVERIFIED or a dict saying who checked which value, and when.
+# a verification only counts while the value (and units) still match what was checked.
+UNVERIFIED = "-"
+
+
+def verification_holds(rec: dict) -> bool:
+    v = rec.get("verified", UNVERIFIED)
+    return (
+        isinstance(v, dict)
+        and values_equal(v.get("value"), rec.get("value"))
+        and v.get("units") == rec.get("units")
+    )
+
+
 # ensures variable names start with a letter (can have digits, or underscores after)
 # capped at 63 characters
 NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,62}$")

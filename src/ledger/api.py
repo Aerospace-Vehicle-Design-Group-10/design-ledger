@@ -10,7 +10,14 @@ from pathlib import Path
 
 from . import provenance
 from .config import Config, LedgerError, find_root
-from .registry import NAME_RE, Registry, normalise_value, values_equal
+from .registry import (
+    NAME_RE,
+    UNVERIFIED,
+    Registry,
+    normalise_value,
+    values_equal,
+    verification_holds,
+)
 
 ### --- state --- ###
 _reads: list[dict] = [{}]  # stack of read logs
@@ -275,6 +282,16 @@ def publish_with(
 
     rec = {"value": value, "units": units.strip()}
     rec["status"] = status or ("computed" if snap else "assumed")
+    # a verification survives a republish only if the number (and units) didn't change
+    cleared = False
+    if old and isinstance(old.get("verified"), dict):
+        if verification_holds({**old, "value": rec["value"], "units": rec["units"]}):
+            rec["verified"] = old["verified"]
+        else:
+            rec["verified"] = UNVERIFIED
+            cleared = True
+    else:
+        rec["verified"] = UNVERIFIED
     if desc or (old and old.get("desc")):
         rec["desc"] = desc or old["desc"]
     if note:
@@ -324,6 +341,8 @@ def publish_with(
             else ""
         )
         print(f"ledger: {name} = {_show(value)} {rec['units']}{was}  [inputs: {ins}]")
+        if cleared:
+            print(f"ledger: {name} was verified at a different value; verification cleared")
     return rec
 
 

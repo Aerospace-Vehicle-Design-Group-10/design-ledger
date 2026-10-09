@@ -51,6 +51,7 @@ submodule at `external/design-ledger`. Team-facing usage instructions live in th
 | `by`, `updated` | `git config user.name` of the publisher; UTC time |
 | `desc`, `note` | optional free text |
 | `frozen` / `unfrozen` | baseline tag it's frozen at / reason it was unfrozen |
+| `verified` | `"-"`, or `{by, at, value, units, note}` once someone has checked the number by hand (`ledger verify`) |
 
 Files are written in a canonical format (fixed key order, shortest exact numbers, integral floats
 as integers), so a file only changes when a value does, whether Python or MATLAB wrote it.
@@ -265,6 +266,22 @@ known limitation, it says so.
 | Requirements from the brief | Frozen at `brief` from the start. |
 | Tag vs freeze | Tag every submission (a bookmark that blocks nothing). Freeze only when the design must stop changing. |
 
+### Verification (`verified`)
+
+| Situation | What happens |
+|---|---|
+| New or republished value | `"verified": "-"`. Records written before this field existed have no `verified` key, which means the same. |
+| `ledger verify NAME... --note "how"` | Sets `verified` to `{by, at, value, units, note}` (`by` = git user name). Refuses if any NAME is stale or stale via upstream, and then verifies none of them; `--force` overrides. Doesn't change the value, so it works on frozen values too. |
+| Verifying an already-verified value | No-op, unless a new `--note` is given (which re-verifies under your name). |
+| Republish/`ledger set` with the **same** value and units (e.g. a re-run after editing the script) | Verification kept. |
+| Republish with a **different** value or units | Verification reset to `"-"`, with a printed notice. |
+| Value hand-edited in the JSON | `verified` no longer matches. `ledger check` warns *"verified … but it's now …"*, the value counts as unverified, and `show` says `OUTDATED`. |
+| Inputs change but the value isn't re-run | Still counts as verified (the number itself is unchanged), but `verify` refuses stale values, and the value shows up as stale anyway. |
+| `ledger unverify NAME...` | Back to `"-"`. |
+| Malformed `verified` (anything but `"-"` or the object) | Schema **error**. |
+| In CI (`--since`) | Not an error either way. The PR comment lists *Verification changes* (who verified what, with their note, or "verification removed"), and the summary line shows `N/M verified`. |
+| What it is not | A permission system. Anyone can run `ledger verify`; review the *Verification changes* in the PR. |
+
 ### Git workflow (`ledger push` / `ledger sync`)
 
 | Situation | What happens |
@@ -309,7 +326,8 @@ known limitation, it says so.
 ### MATLAB (`matlab/+ledger`)
 
 `get`, `publish(name, value, units, note=, desc=, inputs=, discipline=)`, `record`, `begin`,
-`override(name, value, ...)` / `override()`, `reads`, `sync`, `push(msg, draft=)`, `check`, `show`.
+`override(name, value, ...)` / `override()`, `reads`, `sync`, `push(msg, draft=)`, `check`, `show`,
+`verify(names, note=)`.
 `get` and `record` are pure MATLAB (fast, cached). `publish` and the git commands call
 `python -m ledger` with the Python recorded by `ledger setup`.
 
@@ -327,6 +345,9 @@ ledger graph [NAME]                mermaid dependency graph, stale nodes highlig
 ledger export csv|tex|md [--out F]
 ledger freeze TAG [--discipline ...] [--names ...]
 ledger unfreeze NAME --reason "..."
+ledger verify NAME... [--note "how"] [--force]   record a manual check of the current value
+ledger unverify NAME...
+ledger list --unverified           values nobody has checked yet
 ledger tag TAG                     annotated tag on origin/main, pushed
 ```
 

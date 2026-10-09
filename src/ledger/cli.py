@@ -9,7 +9,7 @@ from pathlib import Path
 
 from . import __version__, api, check, export, gitops, merge
 from .config import Config, LedgerError, find_root
-from .registry import Registry
+from .registry import UNVERIFIED, Registry, verification_holds
 
 
 def _cfg() -> Config:
@@ -23,12 +23,14 @@ SEV_ICON = {"error": "✗", "warning": "!", "info": "·"}
 def report_text(rep: check.Report) -> str:
     lines = []
     c = rep.counts
-    order = ["schema", "bounds", "constraint", "frozen", "size", "lint", "stale", "upstream", "manual", "cycle"]
+    order = ["schema", "bounds", "constraint", "frozen", "size", "lint", "verified", "stale", "upstream",
+             "manual", "cycle", "verify"]
     titles = {
         "schema": "Registry format", "bounds": "Out of bounds", "constraint": "Constraints",
         "frozen": "Frozen values", "size": "Large files", "lint": "Hard-coded numbers",
         "stale": "Stale (an input or the script changed)", "upstream": "Stale via something upstream",
         "manual": "Hand-entered values that may need updating", "cycle": "Loops (iterate until converged)",
+        "verified": "Verifications that no longer match the value", "verify": "Verification changes",
     }
     for code in order:
         items = [i for i in rep.items if i.code == code]
@@ -45,7 +47,7 @@ def report_text(rep: check.Report) -> str:
     status = "OK" if rep.ok else "FAILED"
     lines.append(
         f"\n{status}: {c['params']} parameters, {c['stale']} stale, {c['upstream']} stale via upstream, "
-        f"{c['errors']} errors, {c['warnings']} warnings."
+        f"{c['errors']} errors, {c['warnings']} warnings, {c['verified']}/{c['params']} verified."
     )
     return "\n".join(lines).lstrip("\n")
 
@@ -55,7 +57,7 @@ def report_markdown(rep: check.Report, cfg: Config, mention: bool = False) -> st
     head = "### ✅ ledger check passed" if rep.ok else "### ❌ ledger check failed"
     md = ["<!-- ledger-report -->", head, "",
           f"{c['params']} parameters · **{c['stale']}** stale · **{c['upstream']}** stale via upstream · "
-          f"**{c['errors']}** errors · {c['warnings']} warnings", ""]
+          f"**{c['errors']}** errors · {c['warnings']} warnings · {c['verified']}/{c['params']} verified", ""]
     errs = rep.errors
     if errs:
         md += ["#### Must fix before merging", "", "| | What | Problem |", "|---|---|---|"]
@@ -82,6 +84,11 @@ def report_markdown(rep: check.Report, cfg: Config, mention: bool = False) -> st
         md += ["#### Re-run order", ""]
         for k, grp in enumerate(rep.rerun, 1):
             md.append(f"{k}. " + (f"`{grp[0]}`" if len(grp) == 1 else "iterate together: " + ", ".join(f"`{g}`" for g in grp)))
+        md.append("")
+    ver = [i for i in rep.items if i.code == "verify"]
+    if ver:
+        md += ["#### Verification changes", ""]
+        md += [f"- `{i.subject}`: {i.message}" for i in ver]
         md.append("")
     if rep.cycles:
         md += ["<details><summary>Loops in the dependency graph</summary>", ""]
@@ -124,6 +131,13 @@ def cmd_show(a):
             print(f"  {k}: {r[k]}")
     src = r.get("source") or {}
     print(f"  published by {r.get('by')} at {r.get('updated')}" + (f" from {src['script']}" if src.get("script") else ""))
+    ver = r.get("verified", UNVERIFIED)
+    if verification_holds(r):
+        print(f"  verified by {ver['by']} on {ver['at']}" + (f": {ver['note']}" if ver.get("note") else ""))
+    elif isinstance(ver, dict):
+        print(f"  verification OUTDATED: {ver['by']} checked {ver['value']} {ver['units']}")
+    else:
+        print("  not verified")
     if a.name in rep.stale:
         print("  STALE: " + "; ".join(rep.stale[a.name]))
     elif a.name in rep.upstream:
@@ -153,6 +167,8 @@ def cmd_list(a):
     if a.stale:
         rep = check.run(cfg, do_lint=False)
         names = [n for n in names if n in rep.stale or n in rep.upstream]
+    if a.unverified:
+        names = [n for n in names if not verification_holds(recs[n])]
     if a.markdown:
         print(export.markdown_table(recs, names))
         return 0
@@ -162,7 +178,8 @@ def cmd_list(a):
         v = r.get("value")
         vs = f"{v:.6g}" if isinstance(v, float) else str(v)
         fz = "  ❄" if r.get("frozen") else ""
-        print(f"{n:<{w}}  {vs:>14} {r.get('units', ''):<8} {reg.discipline_of(n):<14} {r.get('status', '')}{fz}")
+        ok = "✓" if verification_holds(r) else "-"
+        print(f"{n:<{w}}  {vs:>14} {r.get('units', ''):<8} {reg.discipline_of(n):<14} {ok}  {r.get('status', '')}{fz}")
     print(f"\n{len(names)} parameters")
     return 0
 
@@ -303,6 +320,55 @@ def cmd_unfreeze(a):
     return 0
 
 
+def cmd_verify(a):
+    """Record that a person checked these values by hand. Tied to the current value:
+    if it changes later, the verification is cleared automatically."""
+    cfg = _cfg()
+    reg = Registry.load(cfg.params_dir)
+    rep = None if a.force else check.run(cfg, do_lint=False)
+    # check everything first, so a bad name doesn't leave half the list verified
+    for name in a.names:
+        if reg.discipline_of(name) is None:
+            raise LedgerError(f"'{name}' isn't in the registry.")
+        if rep and (name in rep.stale or name in rep.upstream):
+            raise LedgerError(
+                f"'{name}' is stale, so verifying it would vouch for an out-of-date number. "
+                f"re-run what `ledger check` says first (or use --force)."
+            )
+    from .provenance import git_user
+    who, today = git_user(cfg.root), _dt.date.today().isoformat()
+    touched = set()
+    for name in a.names:
+        disc = reg.discipline_of(name)
+        r = reg.files[disc][name]
+        if verification_holds(r) and not a.note:
+            print(f"{name} is already verified by {r['verified']['by']} on {r['verified']['at']}.")
+            continue
+        r["verified"] = {"by": who, "at": today, "value": r["value"], "units": r["units"]}
+        if a.note:
+            r["verified"]["note"] = a.note
+        touched.add(disc)
+        print(f"Verified {name} = {r['value']} {r['units']}")
+    for disc in touched:
+        reg.save(cfg.params_dir, disc)
+    if touched:
+        print('Share it with: ledger push "verified ..."')
+    return 0
+
+
+def cmd_unverify(a):
+    cfg = _cfg()
+    reg = Registry.load(cfg.params_dir)
+    for name in a.names:
+        disc = reg.discipline_of(name)
+        if disc is None:
+            raise LedgerError(f"'{name}' isn't in the registry.")
+        reg.files[disc][name]["verified"] = UNVERIFIED
+        reg.save(cfg.params_dir, disc)
+        print(f"Marked {name} as not verified.")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="ledger", description="Shared design parameters with provenance.")
     p.add_argument("--version", action="version", version=f"ledger {__version__}")
@@ -337,6 +403,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("list", help="list parameters")
     s.add_argument("discipline", nargs="?")
     s.add_argument("--stale", action="store_true")
+    s.add_argument("--unverified", action="store_true", help="only values nobody has verified")
     s.add_argument("--markdown", action="store_true")
     s.set_defaults(fn=cmd_list)
 
@@ -364,6 +431,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--discipline", nargs="*")
     s.add_argument("--names", nargs="*")
     s.set_defaults(fn=cmd_freeze)
+
+    s = sub.add_parser("verify", help="record that you checked these values by hand")
+    s.add_argument("names", nargs="+")
+    s.add_argument("--note", help='how you checked, e.g. "brief 2.1" or "hand calc, notebook p.12"')
+    s.add_argument("--force", action="store_true", help="verify even if the value is stale")
+    s.set_defaults(fn=cmd_verify)
+
+    s = sub.add_parser("unverify", help="mark values as not verified")
+    s.add_argument("names", nargs="+")
+    s.set_defaults(fn=cmd_unverify)
 
     s = sub.add_parser("unfreeze", help="allow a frozen parameter to change, with a reason")
     s.add_argument("name")

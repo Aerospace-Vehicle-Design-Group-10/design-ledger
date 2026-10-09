@@ -67,8 +67,11 @@ class Repo:
     def params(self, disc: str) -> dict:
         return json.loads((self.root / "params" / f"{disc}.json").read_text())
 
-    def set(self, name, value, units="-", disc="requirements"):
-        self.cli("set", name, json.dumps(value), "--units", units, "--discipline", disc)
+    def set(self, name, value, units="-", disc="requirements", reference="test fixture"):
+        args = ["set", name, json.dumps(value), "--units", units, "--discipline", disc]
+        if reference:
+            args += ["--reference", reference]
+        self.cli(*args)
 
 
 @pytest.fixture

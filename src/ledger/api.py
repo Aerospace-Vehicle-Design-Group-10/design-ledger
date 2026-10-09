@@ -177,6 +177,7 @@ def publish(
     *,
     note: str | None = None,
     desc: str | None = None,
+    reference: str | None = None,
     inputs: list[str] | None = None,
     discipline: str | None = None,
 ) -> dict:
@@ -195,6 +196,7 @@ def publish(
         units,
         note=note,
         desc=desc,
+        reference=reference,
         inputs=inputs,
         discipline=discipline,
         script=script,
@@ -213,6 +215,7 @@ def publish_with(
     *,
     note=None,
     desc=None,
+    reference=None,
     inputs=None,
     discipline=None,
     script: Path | None,
@@ -292,6 +295,9 @@ def publish_with(
             cleared = True
     else:
         rec["verified"] = UNVERIFIED
+    # like desc, a reference outlives republishes unless a new one is given
+    if reference or (old and old.get("reference")):
+        rec["reference"] = reference or old["reference"]
     if desc or (old and old.get("desc")):
         rec["desc"] = desc or old["desc"]
     if note:
@@ -311,6 +317,7 @@ def publish_with(
             and old.get("units") == rec["units"]
             and old.get("source") == rec.get("source")
             and old.get("note") == rec.get("note")
+            and old.get("reference") == rec.get("reference")
             and old.get("status") == rec["status"]
             and set(old.get("inputs", {})) == set(rec.get("inputs", {}))
             and all(

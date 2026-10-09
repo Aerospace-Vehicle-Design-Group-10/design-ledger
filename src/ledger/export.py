@@ -91,12 +91,12 @@ def tex_export(cfg: Config, out: Path | None = None) -> Path:
 
 def markdown_table(recs: dict, names: list[str] | None = None) -> str:
     names = names if names is not None else sorted(recs)
-    out = ["| Name | Value | Units | Status | Verified | By | Updated |", "|---|---|---|---|---|---|---|"]
+    out = ["| Name | Value | Units | Status | Verified | Reference | By | Updated |", "|---|---|---|---|---|---|---|---|"]
     for n in names:
         r = recs[n]
         v = r.get("value")
         vs = f"{v:.6g}" if isinstance(v, float) else (f"[{len(v)} values]" if isinstance(v, list) else str(v))
         ver = r["verified"] if verification_holds(r) else None
         vtxt = f"✓ {ver['by']}, {ver['at']}" if ver else "-"
-        out.append(f"| `{n}` | {vs} | {r.get('units', '')} | {r.get('status', '')} | {vtxt} | {r.get('by', '')} | {str(r.get('updated', ''))[:10]} |")
+        out.append(f"| `{n}` | {vs} | {r.get('units', '')} | {r.get('status', '')} | {vtxt} | {r.get('reference', '')} | {r.get('by', '')} | {str(r.get('updated', ''))[:10]} |")
     return "\n".join(out)

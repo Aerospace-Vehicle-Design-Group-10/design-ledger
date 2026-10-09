@@ -11,6 +11,8 @@ function publish(name, value, units, opts)
 %   Options:
 %     note        free text shown in reviews
 %     desc        what the parameter is (kept across updates)
+%     reference   where the number came from (kept across updates); required
+%                 by CI for values that read nothing (status "assumed")
 %     inputs      use only these names as inputs instead of everything read
 %     discipline  which params/<discipline>.json for a NEW parameter
 %                 (normally taken from the script's folder)
@@ -20,6 +22,7 @@ function publish(name, value, units, opts)
         units (1,1) string
         opts.note (1,1) string = ""
         opts.desc (1,1) string = ""
+        opts.reference (1,1) string = ""
         opts.inputs string = "<auto>"
         opts.discipline (1,1) string = ""
     end
@@ -38,6 +41,7 @@ function publish(name, value, units, opts)
     p.units = char(units);
     p.note = char(opts.note);
     p.desc = char(opts.desc);
+    p.reference = char(opts.reference);
     p.discipline = char(opts.discipline);
     if ~(isscalar(opts.inputs) && opts.inputs == "<auto>")
         p.inputs = cellstr(opts.inputs);

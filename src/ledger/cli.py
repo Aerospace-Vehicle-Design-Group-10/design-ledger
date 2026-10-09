@@ -23,7 +23,7 @@ SEV_ICON = {"error": "✗", "warning": "!", "info": "·"}
 def report_text(rep: check.Report) -> str:
     lines = []
     c = rep.counts
-    order = ["schema", "bounds", "constraint", "frozen", "size", "lint", "verified", "stale", "upstream",
+    order = ["schema", "reference", "bounds", "constraint", "frozen", "size", "lint", "verified", "stale", "upstream",
              "manual", "cycle", "verify"]
     titles = {
         "schema": "Registry format", "bounds": "Out of bounds", "constraint": "Constraints",
@@ -31,6 +31,7 @@ def report_text(rep: check.Report) -> str:
         "stale": "Stale (an input or the script changed)", "upstream": "Stale via something upstream",
         "manual": "Hand-entered values that may need updating", "cycle": "Loops (iterate until converged)",
         "verified": "Verifications that no longer match the value", "verify": "Verification changes",
+        "reference": "Missing references (where did this number come from?)",
     }
     for code in order:
         items = [i for i in rep.items if i.code == code]
@@ -126,7 +127,7 @@ def cmd_show(a):
     r = recs[a.name]
     rep = check.run(cfg, do_lint=False)
     print(f"{a.name} = {r.get('value')} {r.get('units', '')}   [{reg.discipline_of(a.name)}, {r.get('status')}]")
-    for k in ("desc", "note", "frozen"):
+    for k in ("reference", "desc", "note", "frozen"):
         if r.get(k):
             print(f"  {k}: {r[k]}")
     src = r.get("source") or {}
@@ -194,8 +195,36 @@ def _parse_value(s: str):
 def cmd_set(a):
     root = find_root()
     api.publish_with(root, a.name, _parse_value(a.value), a.units, note=a.note, desc=a.desc,
-                     inputs=[], discipline=a.discipline, script=None, read_log={},
-                     status="requirement" if a.requirement else "assumed")
+                     reference=a.reference, inputs=[], discipline=a.discipline, script=None,
+                     read_log={}, status="requirement" if a.requirement else "assumed")
+    rec = api.record(a.name)
+    if not (rec.get("reference") or "").strip():
+        print(f'ledger: warning: {a.name} has no reference, so CI will fail. Add one with '
+              f'--reference "..." or: ledger cite "<source>" {a.name}')
+    return 0
+
+
+def cmd_cite(a):
+    """Set the reference of existing values without touching their value (works on frozen ones)."""
+    cfg = _cfg()
+    reg = Registry.load(cfg.params_dir)
+    text = a.reference.strip()
+    if not text:
+        raise LedgerError("the reference can't be empty.")
+    for name in a.names:
+        if reg.discipline_of(name) is None:
+            raise LedgerError(f"'{name}' isn't in the registry.")
+    touched = set()
+    for name in a.names:
+        disc = reg.discipline_of(name)
+        r = reg.files[disc][name]
+        if r.get("reference") == text:
+            continue
+        r["reference"] = text
+        touched.add(disc)
+        print(f"{name}: reference = {text}")
+    for disc in touched:
+        reg.save(cfg.params_dir, disc)
     return 0
 
 
@@ -211,7 +240,7 @@ def cmd_publish_payload(a):
     if isinstance(inputs, str):
         inputs = [inputs]
     api.publish_with(root, p["name"], p["value"], p["units"], note=p.get("note") or None,
-                     desc=p.get("desc") or None, inputs=inputs, discipline=p.get("discipline") or None,
+                     desc=p.get("desc") or None, reference=p.get("reference") or None, inputs=inputs, discipline=p.get("discipline") or None,
                      script=script, read_log=reads)
     return 0
 
@@ -414,8 +443,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--discipline")
     s.add_argument("--note")
     s.add_argument("--desc")
+    s.add_argument("--reference", help='where it came from, e.g. "AVD brief 2026-27, §2.1"')
     s.add_argument("--requirement", action="store_true", help="mark as a requirement from the brief")
     s.set_defaults(fn=cmd_set)
+
+    s = sub.add_parser("cite", help="set where values came from, without changing them")
+    s.add_argument("reference", help='e.g. "Raymer 6th ed., Table 3.1"')
+    s.add_argument("names", nargs="+")
+    s.set_defaults(fn=cmd_cite)
 
     s = sub.add_parser("graph", help="print a mermaid dependency graph")
     s.add_argument("name", nargs="?", help="only what this depends on and what depends on it")

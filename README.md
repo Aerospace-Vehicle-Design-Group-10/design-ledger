@@ -52,6 +52,7 @@ submodule at `external/design-ledger`. Team-facing usage instructions live in th
 | `desc`, `note` | optional free text |
 | `frozen` / `unfrozen` | baseline tag it's frozen at / reason it was unfrozen |
 | `verified` | `"-"`, or `{by, at, value, units, note}` once someone has checked the number by hand (`ledger verify`) |
+| `reference` | where the number came from, as text ("AVD brief 2026-27, §2.1", "Raymer Table 3.1"). **Required** for `assumed` values. Different from `source`, which is the script that published it |
 
 Files are written in a canonical format (fixed key order, shortest exact numbers, integral floats
 as integers), so a file only changes when a value does, whether Python or MATLAB wrote it.
@@ -150,7 +151,9 @@ known limitation, it says so.
    (`weights/`, `wing/`, …). New parameters go to that discipline's file.
 5. **Units are required. Use SI, angles in `deg`, percentages as fractions.** The tool stores the
    units string and never converts or checks it.
-6. **MATLAB: the first line of every publishing script is `ledger.begin();`.**
+6. **Give every hand-entered or chosen number a `reference`** (`ledger set ... --reference "..."`,
+   `publish(..., reference="...")`, or `ledger cite "..." NAME` afterwards). CI fails without one.
+7. **MATLAB: the first line of every publishing script is `ledger.begin();`.**
 7. **Don't publish in a tight loop** (each publish rewrites a JSON file; in MATLAB each one also
    starts Python). Compute, then publish once.
 8. **Never edit `params/*.json` by hand, except to delete a parameter or fix a broken file**, and
@@ -266,6 +269,18 @@ known limitation, it says so.
 | Requirements from the brief | Frozen at `brief` from the start. |
 | Tag vs freeze | Tag every submission (a bookmark that blocks nothing). Freeze only when the design must stop changing. |
 
+### References (`reference`)
+
+| Situation | What happens |
+|---|---|
+| Which values need one | Those whose `status` is in `require_reference` in `ledger.json` (default `["assumed"]`). Missing or blank → **CI error**. `computed` values (published after reading inputs) don't need one: the script is their source. `requirement` values don't by default either (they come from the brief), but citing them is still useful. |
+| A script that publishes a constant without reading anything | Its status is `assumed`, so it **does** need one: `publish("WS_design", 6250.0, units=..., reference="constraint diagram, poster fig. 3")`. Same for `publish(..., inputs=[])`. |
+| `ledger set ... --reference "..."` / `publish(..., reference="...")` | Sets it. `ledger set` without one prints a warning that CI will fail. |
+| Republishing without `reference=` | The old reference is **kept** (like `desc`; unlike `note`). Giving a new one replaces it. |
+| `ledger cite "REFERENCE" NAME...` | Sets the reference on existing values **without** changing value, `updated` or `by`. Works on frozen values, keeps verifications. All names are checked before anything is written. |
+| Blank or non-text `reference` in the JSON | Schema error. |
+| Lint, staleness, freezing | Unaffected. A reference is text only and never makes anything stale. |
+
 ### Verification (`verified`)
 
 | Situation | What happens |
@@ -315,7 +330,7 @@ known limitation, it says so.
 | call | |
 |---|---|
 | `get(name)` | value; logged as a read |
-| `publish(name, value, units, *, note=, desc=, inputs=, discipline=)` | write to the local registry |
+| `publish(name, value, units, *, note=, desc=, reference=, inputs=, discipline=)` | write to the local registry |
 | `record(name)` | full record dict (not logged) |
 | `begin()` | clear the read log |
 | `step()` | context manager: inner reads are the inputs of inner publishes |
@@ -325,9 +340,9 @@ known limitation, it says so.
 
 ### MATLAB (`matlab/+ledger`)
 
-`get`, `publish(name, value, units, note=, desc=, inputs=, discipline=)`, `record`, `begin`,
+`get`, `publish(name, value, units, note=, desc=, reference=, inputs=, discipline=)`, `record`, `begin`,
 `override(name, value, ...)` / `override()`, `reads`, `sync`, `push(msg, draft=)`, `check`, `show`,
-`verify(names, note=)`.
+`verify(names, note=)`, `cite(reference, names)`.
 `get` and `record` are pure MATLAB (fast, cached). `publish` and the git commands call
 `python -m ledger` with the Python recorded by `ledger setup`.
 
@@ -340,13 +355,14 @@ ledger push "msg" [--draft] [-y]   save work to a branch + PR
 ledger check [--since REF] [--no-lint] [--md F] [--json F] [--mention]
 ledger show NAME                   record, staleness, inputs (used → current), users
 ledger list [DISCIPLINE] [--stale] [--markdown]
-ledger set NAME VALUE --units U [--discipline D] [--note ...] [--requirement]
+ledger set NAME VALUE --units U [--discipline D] [--reference ...] [--note ...] [--requirement]
 ledger graph [NAME]                mermaid dependency graph, stale nodes highlighted
 ledger export csv|tex|md [--out F]
 ledger freeze TAG [--discipline ...] [--names ...]
 ledger unfreeze NAME --reason "..."
 ledger verify NAME... [--note "how"] [--force]   record a manual check of the current value
 ledger unverify NAME...
+ledger cite "REFERENCE" NAME...    set where values came from (doesn't touch the value; works when frozen)
 ledger list --unverified           values nobody has checked yet
 ledger tag TAG                     annotated tag on origin/main, pushed
 ```
@@ -363,6 +379,7 @@ ledger tag TAG                     annotated tag on origin/main, pushed
   "disciplines": { "weights": { "folders": ["weights"], "owners": ["github-user"] } },
   "bounds": { "wing_taper": [0, 1], "MTOW": [0, null] },
   "constraints": ["MLW <= MTOW"],
+  "require_reference": ["assumed"],
   "max_file_mb": 20,
   "lint": { "level": "error", "min_sig_figs": 3, "rel_tol": 0.005, "ignore_values": [] },
   "export": { "csv_template": "...", "csv_map": "...", "csv_out": "...", "tex_out": "..." }

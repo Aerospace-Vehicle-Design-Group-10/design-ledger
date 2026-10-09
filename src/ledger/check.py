@@ -246,6 +246,16 @@ def run(cfg: Config, since: str | None = None, do_lint: bool = True) -> Report:
         if not isinstance(rec.get("inputs", {}), dict):
             rep.add("error", "schema", name, "'inputs' must be an object", d)
 
+        # ---- reference: where a hand-entered number came from
+        ref = rec.get("reference")
+        has_ref = isinstance(ref, str) and bool(ref.strip())
+        if ref is not None and not has_ref:
+            rep.add("error", "schema", name, "'reference' must be non-empty text", d)
+        elif not has_ref and rec.get("status") in cfg["require_reference"]:
+            rep.add("error", "reference", name,
+                    f"{rec.get('status')} value with no reference; say where it came from: "
+                    f"ledger cite \"<source>\" {name}", d)
+
         # ---- verification: "-" or {by, at, value, units[, note]}
         ver = rec.get("verified", UNVERIFIED)
         if ver != UNVERIFIED:

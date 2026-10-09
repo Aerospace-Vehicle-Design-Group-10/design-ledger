@@ -17,6 +17,7 @@ RECORD_ORDER: list[str] = [
     "units",
     "status",
     "verified",
+    "reference",
     "desc",
     "note",
     "frozen",

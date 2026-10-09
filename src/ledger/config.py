@@ -24,6 +24,9 @@ DEFAULTS = {
     "constraints": [
         # eg "MLW <= MTOW", "W_payload + W_fuel_design < MTOW"
     ],
+    # statuses that must say where the number came from ("reference"). a script that
+    # computed a value is its own source; requirements come from the brief
+    "require_reference": ["assumed"],
     "max_file_mb": 20,  # files bigger than this are refused by push and flagged by CI
     "lint": {  # the hard-coded number check; ledger.json can override any of these
         "level": "error",  # "error" blocks CI, "warning" only reports

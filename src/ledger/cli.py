@@ -20,81 +20,127 @@ def _cfg() -> Config:
 SEV_ICON = {"error": "✗", "warning": "!", "info": "·"}
 
 
-def report_text(rep: check.Report) -> str:
-    lines = []
+TITLES = {
+    "schema": "Registry format", "bounds": "Out of bounds", "constraint": "Constraints",
+    "frozen": "Frozen values", "size": "Large files", "lint": "Hard-coded numbers",
+    "stale": "Stale (an input or the script changed)", "upstream": "Stale via something upstream",
+    "manual": "Hand-entered values that may need updating", "cycle": "Loops (iterate until converged)",
+    "verified": "Verifications that no longer match the value", "verify": "Verification changes",
+    "reference": "Missing references (where did this number come from?)",
+}
+ERROR_ORDER = ["schema", "reference", "bounds", "constraint", "frozen", "size", "lint", "verified"]
+STALE_ORDER = ["stale", "upstream", "manual"]
+WARNING_ORDER = ["lint", "schema", "reference", "bounds", "constraint", "frozen", "size", "verified", "verify"]
+COLLAPSE_OVER = 10  # markdown: longer warning lists go in a <details> block
+
+
+def report_sections(rep: check.Report):
+    """Split the report the way it is shown: Errors first, then Warnings.
+
+    Errors: everything that fails the check (severity "error") plus out-of-date values (stale,
+    stale via upstream, hand-entered stale values), which need someone to act but don't fail CI.
+    Warnings: everything else (hard-coded numbers at the default lint level, verification changes, ...).
+    Loops go with the re-run order, in the Errors section.
+    """
+    blocking = [i for i in rep.items if i.severity == "error"]
+    stale = [i for i in rep.items if i.code in STALE_ORDER and i.severity != "error"]
+    warnings = [i for i in rep.items
+                if i.severity != "error" and i.code not in STALE_ORDER and i.code != "cycle"]
+    return blocking, stale, warnings
+
+
+def _by_code(items, order):
+    """(code, items) groups in display order; codes not listed come last."""
+    codes = order + sorted({i.code for i in items} - set(order))
+    return [(c, [i for i in items if i.code == c]) for c in codes if any(i.code == c for i in items)]
+
+
+def _summary(rep: check.Report) -> tuple[str, int, int]:
+    blocking, stale, warnings = report_sections(rep)
+    n_warn = sum(1 for i in warnings if i.severity == "warning")
     c = rep.counts
-    order = ["schema", "reference", "bounds", "constraint", "frozen", "size", "lint", "verified", "stale", "upstream",
-             "manual", "cycle", "verify"]
-    titles = {
-        "schema": "Registry format", "bounds": "Out of bounds", "constraint": "Constraints",
-        "frozen": "Frozen values", "size": "Large files", "lint": "Hard-coded numbers",
-        "stale": "Stale (an input or the script changed)", "upstream": "Stale via something upstream",
-        "manual": "Hand-entered values that may need updating", "cycle": "Loops (iterate until converged)",
-        "verified": "Verifications that no longer match the value", "verify": "Verification changes",
-        "reference": "Missing references (where did this number come from?)",
-    }
-    for code in order:
-        items = [i for i in rep.items if i.code == code]
-        if not items:
-            continue
-        lines.append(f"\n{titles[code]}:")
-        for i in items:
-            who = f"  [{i.discipline}]" if i.discipline else ""
-            lines.append(f"  {SEV_ICON[i.severity]} {i.subject}: {i.message}{who}")
+    return (f"{c['params']} parameters · errors: {len(blocking)} blocking, {c['stale']} stale, "
+            f"{c['upstream']} stale via upstream · {n_warn} warnings · {c['verified']}/{c['params']} verified",
+            len(blocking), n_warn)
+
+
+def report_text(rep: check.Report) -> str:
+    blocking, stale, warnings = report_sections(rep)
+    lines = ["ERRORS"]
+
+    def block(items, order):
+        for code, grp in _by_code(items, order):
+            lines.append(f"  {TITLES.get(code, code)}:")
+            for i in grp:
+                who = f"  [{i.discipline}]" if i.discipline else ""
+                lines.append(f"    {SEV_ICON[i.severity]} {i.subject}: {i.message}{who}")
+
+    block(blocking, ERROR_ORDER)
+    block(stale, STALE_ORDER)
     if rep.rerun:
-        lines.append("\nRe-run in this order:")
+        lines.append("  Re-run in this order:")
         for k, grp in enumerate(rep.rerun, 1):
-            lines.append(f"  {k}. " + (grp[0] if len(grp) == 1 else "iterate together: " + ", ".join(grp)))
-    status = "OK" if rep.ok else "FAILED"
-    lines.append(
-        f"\n{status}: {c['params']} parameters, {c['stale']} stale, {c['upstream']} stale via upstream, "
-        f"{c['errors']} errors, {c['warnings']} warnings, {c['verified']}/{c['params']} verified."
-    )
-    return "\n".join(lines).lstrip("\n")
+            lines.append(f"    {k}. " + (grp[0] if len(grp) == 1 else "iterate together: " + ", ".join(grp)))
+    for i in (i for i in rep.items if i.code == "cycle"):
+        lines.append(f"  {SEV_ICON[i.severity]} loop: {i.subject}: {i.message}")
+    if len(lines) == 1:
+        lines.append("  none")
+    lines += ["", "WARNINGS"]
+    n = len(lines)
+    block(warnings, WARNING_ORDER)
+    if len(lines) == n:
+        lines.append("  none")
+    summary, _, _ = _summary(rep)
+    lines.append(f"\n{'OK' if rep.ok else 'FAILED'}: {summary}.")
+    return "\n".join(lines)
 
 
 def report_markdown(rep: check.Report, cfg: Config, mention: bool = False) -> str:
-    c = rep.counts
+    blocking, stale, warnings = report_sections(rep)
+    summary, _, _ = _summary(rep)
     head = "### ✅ ledger check passed" if rep.ok else "### ❌ ledger check failed"
-    md = ["<!-- ledger-report -->", head, "",
-          f"{c['params']} parameters · **{c['stale']}** stale · **{c['upstream']}** stale via upstream · "
-          f"**{c['errors']}** errors · {c['warnings']} warnings · {c['verified']}/{c['params']} verified", ""]
-    errs = rep.errors
-    if errs:
-        md += ["#### Must fix before merging", "", "| | What | Problem |", "|---|---|---|"]
-        md += [f"| ✗ | `{i.subject}` | {i.message} |" for i in errs]
+    md = ["<!-- ledger-report -->", head, "", summary, ""]
+
+    # ---- Errors: what fails the check, then what is out of date
+    md += ["#### Errors", ""]
+    if not (blocking or stale or rep.rerun or rep.cycles):
+        md += ["_None._", ""]
+    if blocking:
+        md += ["**Must fix before merging**", "", "| | What | Problem |", "|---|---|---|"]
+        md += [f"| ✗ | `{i.subject}` | {i.message} |" for i in blocking]
         md.append("")
-    warn_other = [i for i in rep.warnings if i.code not in ("stale", "upstream")]
-    if warn_other:
-        md += ["#### Warnings", ""]
-        md += [f"- `{i.subject}`: {i.message}" for i in warn_other]
-        md.append("")
-    stale = [i for i in rep.items if i.code in ("stale", "upstream")]
     if stale:
-        md += ["#### Out of date", ""]
+        md += ["**Out of date** (re-run these; they don't block merging)", ""]
         by_disc: dict = {}
         for i in stale:
             by_disc.setdefault(i.discipline or "unassigned", []).append(i)
         for d in sorted(by_disc):
             owners = cfg.owners(d)
             tag = (" " + " ".join("@" + o for o in owners)) if (mention and owners) else ""
-            md.append(f"**{d}**{tag}")
+            md.append(f"*{d}*{tag}")
             md += [f"- `{i.subject}`: {i.message}" for i in by_disc[d]]
             md.append("")
     if rep.rerun:
-        md += ["#### Re-run order", ""]
+        md += ["**Re-run order**", ""]
         for k, grp in enumerate(rep.rerun, 1):
             md.append(f"{k}. " + (f"`{grp[0]}`" if len(grp) == 1 else "iterate together: " + ", ".join(f"`{g}`" for g in grp)))
-        md.append("")
-    ver = [i for i in rep.items if i.code == "verify"]
-    if ver:
-        md += ["#### Verification changes", ""]
-        md += [f"- `{i.subject}`: {i.message}" for i in ver]
         md.append("")
     if rep.cycles:
         md += ["<details><summary>Loops in the dependency graph</summary>", ""]
         md += ["- " + " ↔ ".join(f"`{n}`" for n in comp) for comp in rep.cycles]
         md += ["", "</details>", ""]
+
+    # ---- Warnings: everything else
+    md += ["#### Warnings", ""]
+    if not warnings:
+        md += ["_None._", ""]
+    for code, grp in _by_code(warnings, WARNING_ORDER):
+        title = TITLES.get(code, code)
+        lines = [f"- `{i.subject}`: {i.message}" for i in grp]
+        if len(grp) > COLLAPSE_OVER:
+            md += [f"<details><summary><b>{title}</b> ({len(grp)})</summary>", "", *lines, "", "</details>", ""]
+        else:
+            md += [f"**{title}**", "", *lines, ""]
     return "\n".join(md)
 
 

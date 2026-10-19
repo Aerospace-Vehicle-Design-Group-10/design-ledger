@@ -255,3 +255,32 @@ def test_markdown_report_mentions_owners(repo):
     repo.cli("check", "--no-lint", "--md", str(md), "--mention", check=False)
     text = md.read_text()
     assert "<!-- ledger-report -->" in text and "@alice" in text and "Re-run order" in text
+
+
+def test_report_puts_stale_under_errors_and_lint_under_warnings(repo):
+    chain(repo)
+    repo.set("MTOW", 698500, "N")  # CG_x goes stale; S_ht and what follows go stale via upstream
+    (repo.root / "weights/bad.py").write_text("W0 = 698500\n")
+    p = repo.cli("check", check=False)
+    assert p.returncode == 0  # stale values and hard-coded numbers (default level) don't fail
+    errors, warnings = p.stdout.split("WARNINGS")
+    assert errors.startswith("ERRORS") and "CG_x" in errors and "S_ht" in errors and "Re-run" in errors
+    assert "Hard-coded numbers" in warnings and "weights/bad.py:1" in warnings
+    assert "errors: 0 blocking, 1 stale, 2 stale via upstream · 1 warnings" in p.stdout
+    md = repo.root / "r.md"
+    repo.cli("check", "--md", str(md), check=False)
+    text = md.read_text()
+    assert text.index("#### Errors") < text.index("Out of date") < text.index("#### Warnings")
+    assert text.index("#### Warnings") < text.index("Hard-coded numbers")
+
+
+def test_lint_level_error_still_fails(repo):
+    seed(repo)
+    cfg = json.loads((repo.root / "ledger.json").read_text())
+    cfg["lint"] = {"level": "error"}
+    (repo.root / "ledger.json").write_text(json.dumps(cfg))
+    (repo.root / "weights/bad.py").write_text("W0 = 712000\n")
+    p = repo.cli("check", check=False)
+    assert p.returncode == 1
+    errors, _ = p.stdout.split("WARNINGS")
+    assert "Hard-coded numbers" in errors and "weights/bad.py:1" in errors

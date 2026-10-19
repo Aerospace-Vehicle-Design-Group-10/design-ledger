@@ -29,7 +29,7 @@ DEFAULTS = {
     "require_reference": ["assumed"],
     "max_file_mb": 20,  # files bigger than this are refused by push and flagged by CI
     "lint": {  # the hard-coded number check; ledger.json can override any of these
-        "level": "error",  # "error" blocks CI, "warning" only reports
+        "level": "warning",  # "warning" only reports (the default); "error" fails check and CI
         "min_sig_figs": 3,  # literals with fewer sig figs are ignored (0.5, 2, ...)
         "rel_tol": 0.005,  # how close a literal must be to a registry value to flag
         "extensions": [".py", ".m", ".ipynb"],

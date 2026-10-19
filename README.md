@@ -97,12 +97,22 @@ know to iterate. Re-run order is a topological sort of the affected scripts, wit
 | `constraints` in `ledger.json` (`"MLW <= MTOW"`; arithmetic and chained comparisons allowed; skipped until all names exist) | error |
 | frozen value changed vs `--since` ref without `unfreeze` | error |
 | files over `max_file_mb` changed vs `--since` ref | error |
-| hard-coded numbers in `.py`/`.m`/`.ipynb` (≥ `min_sig_figs` significant figures, within `rel_tol` of a registry value; common constants skipped; a script's own published values don't count; `ledger: ignore` on the line silences) | `lint.level` (default error) |
+| hard-coded numbers in `.py`/`.m`/`.ipynb` (≥ `min_sig_figs` significant figures, within `rel_tol` of a registry value; common constants skipped; a script's own published values don't count; `ledger: ignore` on the line silences) | `lint.level` (default warning) |
 | stale / upstream | warning |
 | loops, hand-entered stale values | info |
 
 With `--since REF` (CI uses `origin/main`), the hard-coded-number scan only covers files changed
 since REF.
+
+The report (terminal, PR comment and the stale-values issue) has two sections:
+
+- **Errors** at the top: everything that fails the check, then everything out of date (stale, stale
+  via upstream, hand-entered stale values) with the re-run order and any loops. Out-of-date values
+  are listed here because someone has to act on them, but they still don't fail the check.
+- **Warnings** below: everything else, e.g. hard-coded numbers at the default `warning` level and
+  verification changes. In the PR comment, a list longer than 10 is folded.
+
+The summary line counts them the same way: `errors: N blocking, N stale, N stale via upstream · N warnings`.
 
 ### Git workflow
 
@@ -234,7 +244,7 @@ known limitation, it says so.
 | A script edited and re-run, outputs identical | Its outputs are fresh, and so is everything downstream. |
 | Dependency loop (A reads B, B reads A) | Allowed. Fresh once converged (each was computed with the other's current value). Listed as *info*; re-run order shows *"iterate together"*. |
 | Stale value with no source (`ledger set`, notebooks) | Reported as *"has no source script; update it by hand"*. |
-| Stale values in CI | **Warnings only.** They never fail a PR. On `main`, CI keeps one *"Stale values (ledger)"* issue, @mentioning `owners`, and closes it when everything is fresh. |
+| Stale values in CI | Listed under **Errors** in the report, but they never fail a PR. On `main`, CI keeps one *"Stale values (ledger)"* issue, @mentioning `owners`, and closes it when everything is fresh. |
 
 ### What fails `ledger check` (exit code 1, red CI)
 
@@ -245,7 +255,7 @@ known limitation, it says so.
 | `constraints` | Python-like expressions over names and numbers: `+ - * / **`, comparisons (chainable), `and`/`or`, unary minus. **Skipped until every name in it exists.** |
 | Frozen value changed or deleted | **Only with `--since REF`** (what CI runs on PRs). Locally, the publish guard blocks it instead; hand-edits are only caught in CI. |
 | Changed file over `max_file_mb` | Only with `--since`. `ledger push` also refuses them up front. |
-| Hard-coded numbers | When `lint.level` is `error` (the default). See below. |
+| Hard-coded numbers | Only when `lint.level` is `error`. The default is `warning`: they are listed under *Warnings* and don't fail. See below. |
 
 ### The hard-coded-number check (lint)
 
@@ -381,7 +391,7 @@ ledger tag TAG                     annotated tag on origin/main, pushed
   "constraints": ["MLW <= MTOW"],
   "require_reference": ["assumed"],
   "max_file_mb": 20,
-  "lint": { "level": "error", "min_sig_figs": 3, "rel_tol": 0.005, "ignore_values": [] },
+  "lint": { "level": "warning", "min_sig_figs": 3, "rel_tol": 0.005, "ignore_values": [] },
   "export": { "csv_template": "...", "csv_map": "...", "csv_out": "...", "tex_out": "..." }
 }
 ```
